@@ -1,9 +1,9 @@
 #!/bin/bash
-# /etc/init.d/bittorrent
-# version 2012-07-17 (YYYY-MM-DD)
+# /etc/init.d/rtorrent
+# version 2014-12-04 (YYYY-MM-DD)
  
 ### BEGIN INIT INFO
-# Provides: bittorrent
+# Provides: rtorrent
 # Required-Start: $local_fs $remote_fs
 # Required-Stop: $local_fs $remote_fs
 # Should-Start: $network
@@ -14,8 +14,10 @@
 # Description: Starts the rTorrent BitTorrent client
 ### END INIT INFO
 
-# rtorrent-init-script - An initscript to start rTorrent on CentOS
-# Copyright (C) 2011 - Super Jamie <jamie@superjamie.net>
+# rtorrent-tmux - An initscript to start rTorrent on Debian
+# Copyright (C) 2014 - Zumochi
+#
+# Original script Copyright (C) 2011 - Super Jamie <jamie@superjamie.net>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -31,11 +33,11 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 # Source function library
-. /etc/rc.d/init.d/functions
+. /lib/lsb/init-functions
 
 ## Settings
 # Username of non-root user who will run the server
-USERNAME="username"
+USERNAME=$2
 # Nice looking name of service for script to report back to users
 SERVERNAME="rTorrent"
 # Filename of server binary
@@ -46,15 +48,24 @@ BASEPATH="/home/${USERNAME}"
 CONFIGFILE=".rtorrent.rc"
 # Sets location of config file
 CONFIGPATH="${BASEPATH}/${CONFIGFILE}"
-# Name of screen session
-SCRNAME="rtorrent"
+# Name of tmux session
+SCRNAME="rt"
 # Set of options to run rtorrent with
 OPTIONS=""
 ## End Settings
 
 ## Functions
 
-# Run all commands as the non-root user
+# Check if user exists
+check_user() {
+  if ! id -u $USERNAME > /dev/null 2>&1;
+  then
+    echo "* User ${USERNAME} does not exist."
+    exit 1;
+  fi
+}
+
+# Run all commands as a non-root user
 as_user() {
   ME=`whoami`
   if [ $ME == $USERNAME ] ; then
@@ -69,7 +80,7 @@ check_running() {
   get_session;
   if ! [ -s ${SESSIONPATH}/rtorrent.lock ];
   then
-    echo "* ${SERVERNAME} is not running."
+    echo "* ${SERVERNAME} isn't running."
     exit 1;
   fi
 }
@@ -79,9 +90,9 @@ get_pid() {
   PID=`cat ${SESSIONPATH}/rtorrent.lock | awk -F: '{print($2)}' | sed "s/[^0-9]//g"`
 }
 
-# Get the session path from the configfile. REQUIRES ABSOLUTE PATH! eg: session = /home/username/.session
+# Get the session path from the configfile. REQUIRES RELATIVE PATH! eg: session = .session
 get_session() {
-  SESSIONPATH=`cat ${CONFIGPATH} | grep "^[[:space:]]*session[[:space:]]*=" | sed "s/^[[:space:]]*session[[:space:]]*=[[:space:]]*//"`
+  SESSIONPATH=$BASEPATH/`cat ${CONFIGPATH} | grep "^[[:space:]]*session[[:space:]]*=" | sed "s/^[[:space:]]*session[[:space:]]*=[[:space:]]*//"`
 }
 
 # Check the rTorrent binary is in the path, check the config file is readable, check the session dir is readable
@@ -116,58 +127,82 @@ check_files() {
   fi
 }
 
-# Start rTorrent as a service within a screen session
+# Start rTorrent as a service within a tmux session
 do_start() {
+  check_user;
   check_files;
 
   get_session;
   if ! [ -s ${SESSIONPATH}/rtorrent.lock ];
   then
-    echo "* ${SERVERNAME} was not already running. Starting..."
-    # -c /dev/null  : run screen with no config file, the user could already have one which breaks things
-    # -fn           : turn flow-control off so ctrl+q works to quit
-    # -dmS          : start a detatched screen called $SCRNAME with $SERVICE $OPTIONS inside it
-    as_user "cd ${BASEPATH} && screen -c /dev/null -fn -dmS ${SCRNAME} ${SERVICE} ${OPTIONS} 2>&1 1>/dev/null"
+    echo "* ${SERVERNAME} isn't running. Starting..."
+    # new-session	: start a new tmux session
+    # -s		: tmux window name
+    # -n		: fancy session name
+    # -d		: start detached tmux session $SCRNAME called $SERVERNAME with $SERVICE $OPTIONS
+    as_user "cd ${BASEPATH} && tmux new-session -s ${SCRNAME} -n ${SERVERNAME} -d ${SERVICE} ${OPTIONS}"
 
-    echo "* Checking ${SERVERNAME} is running..."
     sleep 2;
     do_status;
   else
     get_pid;
-    echo "* ${SERVERNAME} was already running! (pid ${PID})"
+    echo "* ${SERVERNAME} is running! (pid ${PID})"
     exit 1;
   fi
 }
 
 do_stop() {
+  check_user;
   check_running;
-
   echo "* Attempting to stop ${SERVERNAME}..."
+  # Send the stop command (Ctrl+Q) to rtorrent
+  as_user "tmux send-keys -t ${SCRNAME} C-q"
 
-  get_pid;
-  # make sure the pid doesn't belong to another process
-  if ps -A | grep -sq ${PID}.*${SERVICE};
-  then
-    kill -s INT ${PID}
-  else
-    echo "* Failed to stop ${SERVERNAME}. Process ${PID} belongs to something else. Manual intervention required."
-    exit 1;
-  fi
+  # Wait a bit for it to close
+  sleep 3;
 
-  # when rTorrent gets SIGINT it waits 5 seconds to send totals to trackers before quitting, so we sleep 5 here
-  sleep 5;
+  # Check if it closed or not
   get_session;
   if ! [ -s ${SESSIONPATH}/rtorrent.lock ];
   then
     echo "* ${SERVERNAME} has been stopped."
   else
+    echo "* ${SERVERNAME} hasn't stopped yet, trying something else ;)"
     get_pid;
-    echo "* ${SERVERNAME} is still running! (pid ${PID})"
+
+    # Make sure the pid doesn't belong to another process
+    if ps ${PID} | grep -sq ${SERVICE};
+    then
+      if ! [ -s ${SESSIONPATH}/rtorrent.lock ];
+      then
+        echo "* ${SERVERNAME} has been stopped."
+      else
+        kill -s INT ${PID}
+      fi
+
+      # Wait 5 seconds to send the stop request to trackers
+      sleep 5;
+      get_session;
+      if ! [ -s ${SESSIONPATH}/rtorrent.lock ];
+      then
+        echo "* ${SERVERNAME} has been stopped."
+      else
+        echo "* ${SERVERNAME} still hasn't stopped, killing. >:("
+        kill ${PID}
+        as_user "rm -f ${SESSIONPATH}/rtorrent.lock"
+        echo "* Killed ${SERVERNAME}."
+      fi
+    else
+      UNKNOWNPROC="`ps -o command ${PID} | tail -n 1`"
+      echo "* Failed to stop ${SERVERNAME}. Process ${PID} belongs to ${UNKNOWNPROC}. Manual intervention required."
+      exit 1;
+    fi
   fi
 }
 
 # Check if process is running and return PID
 do_status() {
+  check_user;
   check_running;
 
   get_pid;
@@ -176,55 +211,59 @@ do_status() {
 
 # Give a bit more information than status
 do_info() {
+  check_user;
   check_running;
 
   get_pid;
-  RSS="`ps -p ${PID} --format rss | tail -n 1 | awk '{print $1}'`"
+  RSS="`ps -o rss ${PID} | tail -n 1`"
   echo "- Base Path             : ${BASEPATH}"
   echo "- Config File           : ${CONFIGPATH}"
   echo "- Screen Session Name   : ${SCRNAME}"
   echo "- rTorrent Session Path : ${SESSIONPATH}"
   echo "- Process ID            : "${PID}""
-  echo "- Memory Usage          : `expr ${RSS} / 1024` Mb (${RSS} kb)"
-  echo "- Active Connections    : "
-  netstat --ip -anp | grep -E "Proto|${SERVICE}"
+  echo "- Memory Usage          : `expr ${RSS} / 1024` MB (${RSS} kB)"
 }
 
-# Connect to the active Screen session. Disconnect with Ctrl+a then d
+# Connect to the active tmux session. Disconnect with Ctrl+b then d
 do_connect() {
+  check_user;
   check_running;
 
-  as_user "screen -dr ${SCRNAME}"
+  as_user "tmux attach -t ${SCRNAME}"
 }
 
 
 ## These are the parameters passed to the script
-
-case "$1" in
-'start')
-  do_start;
-  ;;
-'stop')
-  do_stop;
-  ;;
-'restart')
-  do_stop;
-  sleep 1
-  do_start;
-  ;;
-'status')
-  do_status;
-  ;;
-'info')
-  do_info
-  ;;
-'connect')
-  do_connect;
-  ;;
-*)
-  echo "* Usage: bittorrent {start|stop|restart|status|info|connect}"
-  exit 1;
-  ;;
-esac
-
+if [ $# -eq 2 ];
+then
+  case "$1" in
+  'start')
+    do_start;
+    ;;
+  'stop')
+    do_stop;
+    ;;
+  'restart')
+    do_stop;
+    sleep 1
+    do_start;
+    ;;
+  'status')
+    do_status;
+    ;;
+  'info')
+    do_info
+    ;;
+  'connect')
+    do_connect;
+    ;;
+  *)
+    echo "* usage: rtorrent {start|stop|restart|status|info|connect} username"
+    exit 1;
+    ;;
+  esac
+else
+  echo "* usage: rtorrent {start|stop|restart|status|info|connect} username"
+fi
 exit 0;
+
