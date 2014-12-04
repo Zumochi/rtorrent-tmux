@@ -71,7 +71,13 @@ as_user() {
   if [ $ME == $USERNAME ] ; then
     bash -c "$1"
   else
-    su - $USERNAME -c "$1"
+    if [[ $EUID -ne 0 ]];
+    then
+      echo "* Please run this script as root if you're running it for another user."
+      exit 1;
+    else
+      su - $USERNAME -c "$1"
+    fi
   fi
 }
 
@@ -224,14 +230,13 @@ do_info() {
   echo "- Memory Usage          : `expr ${RSS} / 1024` MB (${RSS} kB)"
 }
 
-# Connect to the active tmux session. Disconnect with Ctrl+b then d
+# Connect to the active tmux session. Disconnect with Ctrl+B, D
 do_connect() {
   check_user;
   check_running;
 
   as_user "tmux attach -t ${SCRNAME}"
 }
-
 
 ## These are the parameters passed to the script
 if [ $# -eq 2 ];
