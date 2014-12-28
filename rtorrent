@@ -44,6 +44,8 @@ SERVICE="rtorrent"
 CONFIGFILE=".rtorrent.rc"
 # Name of tmux session
 SCRNAME="rt"
+# Extra options
+OPTIONS=
 ## End Settings
 
 ## Functions
@@ -52,11 +54,14 @@ SCRNAME="rt"
 check_user() {
   ME=`whoami`
   # See if we gave the user as a parameter
-  if [ -z "$FORUSER" ];
+  if ! [ -z "$USER" ];
   then
-    USERNAME=$ME
+    # We run the script for another user
+    USERNAME=$USER
+    FORUSER=true
   else
-    USERNAME=$FORUSER
+    # We run the script for ourselves
+    USERNAME=$ME
   fi
 
   # Check if user exists
@@ -66,14 +71,14 @@ check_user() {
     exit 1;
   fi
 
-  # Check if we're running the script for another user
+  # Script must be run as root if it's being run for another user
   if [ ${EUID} -ne 0 ] && ! [ ${ME} == ${USERNAME} ];
   then
     echo "* Please run this script as root if you're running it for another user."
     exit 1;
   fi
 
-  # Check if we're trying to run as root
+  # Check if we're trying to run for the root user
   if [ ${USERNAME} == "root" ]
   then
     echo "* Please don't try to run ${SERVERNAME} as root."
@@ -82,22 +87,21 @@ check_user() {
 
   # Define user home folder
   BASEPATH="$(getent passwd $USERNAME | awk -F ':' '{print $6}')"
-  # Sets location of config file
+  # Set location of config file
   CONFIGPATH="${BASEPATH}/${CONFIGFILE}"
 }
 
 # Run all commands as a non-root user
 as_user() {
-  ME=`whoami`
-  if [ $ME == $USERNAME ];
+  if [ "$FORUSER" = true ];
   then
-    bash -c "$1"
-  else
     su - $USERNAME -c "$1"
+  else
+    bash -c "$1"
   fi
 }
 
-# Check if rTorrent is running. If not, say so and exit the script.
+# Check if rTorrent is running
 check_running() {
   get_session;
   if ! [ -s ${SESSIONPATH}/rtorrent.lock ];
@@ -112,12 +116,12 @@ get_pid() {
   PID=`cat ${SESSIONPATH}/rtorrent.lock | awk -F: '{print($2)}' | sed "s/[^0-9]//g"`
 }
 
-# Get the session path from the configfile. REQUIRES RELATIVE PATH! eg: session = .session
+# Get the session path from the configfile. REQUIRES ABSOLUTE PATH! e.g.: session = /home/user/.session
 get_session() {
   SESSIONPATH=`cat ${CONFIGPATH} | grep "^[[:space:]]*session[[:space:]]*=" | sed "s/^[[:space:]]*session[[:space:]]*=[[:space:]]*//"`
 }
 
-# Check the rTorrent binary is in the path, check the config file is readable, check the session dir is readable
+# Check if the rTorrent binary is in PATH, the config file is readable and if the session dir is readable
 check_files() {
   RTORRENTEXISTS=0
   for i in `echo "$PATH" | tr ':' '\n'`;
@@ -162,7 +166,7 @@ do_start() {
     # -s		: tmux window name
     # -n		: fancy session name
     # -d		: start detached tmux session $SCRNAME called $SERVERNAME with $SERVICE $OPTIONS
-    as_user "cd ${BASEPATH} && tmux new-session -s ${SCRNAME} -n ${SERVERNAME} -d ${SERVICE} ${OPTIONS}"
+    as_user "tmux new-session -s ${SCRNAME} -n ${SERVERNAME} -d ${SERVICE} ${OPTIONS}"
 
     sleep 2;
     do_status;
@@ -288,11 +292,11 @@ parse_commands() {
   esac
 }
 
-if [ $# -eq 1 ] || [ $# -eq 2 ];
+# Check if paramters are supplied, otherwise print usage
+if (( "$#" != 0 ))
 then
   COMMAND=$1
-  FORUSER=$2
-#  check_user;
+  USER=$2
   parse_commands;
 else
   print_usage;
