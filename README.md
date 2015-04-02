@@ -2,7 +2,7 @@
 
 This is an initscript to run rTorrent on Debian
 
-Original script by Super Jamie <jamie@superjamie.net>  
+Original script by Super Jamie <jamie@superjamie.net>
 tmux conversion & new functions by Zumochi
 
 ####Requirements
@@ -24,14 +24,15 @@ alias rt='rtorrent'
 
 ####Usage
 - *Note:* username is not needed if you're running the script for yourself
-- Control the daemon with  
-`rtorrent start (username)` to start  
-`rtorrent stop (username)` to stop  
+- Control the daemon with
+`rtorrent start (username)` to start
+`rtorrent stop (username)` to stop
+`rtorrent force-stop (username)` to kill if it hangs
 `rtorrent restart (username)` to restart
-- Get information about the daemon with  
-`rtorrent status (username)` to see the PID if it's running  
+- Get information about the daemon with
+`rtorrent status (username)` to see the PID if it's running
 `rtorrent info (username)` to see more
-- Connect to the tmux session with  
+- Connect to the tmux session with
 `rtorrent connect (username)` (press Ctrl+B, D to disconnect)
 
 ####Licensing

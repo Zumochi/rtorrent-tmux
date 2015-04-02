@@ -213,10 +213,8 @@ do_stop() {
       then
         echo "* ${SERVERNAME} has been stopped."
       else
-        echo "* ${SERVERNAME} still hasn't stopped, killing. >:("
-        kill ${PID}
-        as_user "rm -f ${SESSIONPATH}/rtorrent.lock"
-        echo "* Killed ${SERVERNAME}."
+        echo "* ${SERVERNAME} still hasn't stopped. Try again, or kill with 'force-stop'."
+        exit 1;
       fi
     else
       UNKNOWNPROC="`ps -o command ${PID} | tail -n 1`"
@@ -224,6 +222,18 @@ do_stop() {
       exit 1;
     fi
   fi
+}
+
+# Forcefully kill the process and remove the lockfile.
+do_force_stop() {
+  check_user;
+  check_running;
+  echo "* Killing ${SERVERNAME}..."
+  get_session;
+  get_pid;
+  kill ${PID}
+  as_user "rm -f ${SESSIONPATH}/rtorrent.lock"
+  echo "* Killed ${SERVERNAME}."
 }
 
 # Check if process is running and return PID
@@ -259,7 +269,7 @@ do_connect() {
 }
 
 print_usage() {
-    echo "* Usage: rtorrent {start|stop|restart|status|info|connect} (username)"
+    echo "* Usage: rtorrent {start|stop|force-stop|restart|status|info|connect} (username)"
 }
 
 ## These are the parameters passed to the script
@@ -270,6 +280,9 @@ parse_commands() {
     ;;
   'stop')
     do_stop;
+    ;;
+  'force-stop')
+    do_force_stop;
     ;;
   'restart')
     do_stop;
